@@ -604,92 +604,104 @@ def parse_and_execute(query):
         return
 
     # === PRIORITY: "X vs Y" queries → always resolve as match lookup ===
-    vs_match = re.match(r'^(.+?)\s+vs\.?\s+(.+?)(?:\s+.+)?$', query, re.IGNORECASE)
+    vs_match = re.search(r'(.+?)\s+vs\.?\s+(.+)', query, re.IGNORECASE)
     if vs_match:
         team_a = vs_match.group(1).strip()
-        team_b = vs_match.group(2).strip()
+        team_b_raw = vs_match.group(2).strip()
+        # Clean team_a — remove leading noise phrases
+        for prefix in ["what is happening in", "whats happening in", "what's happening in",
+                        "commentary for", "updates for", "latest on", "show me",
+                        "give me", "tell me about", "how is", "what about"]:
+            if team_a.lower().startswith(prefix):
+                team_a = team_a[len(prefix):].strip()
+                break
         # Strip trailing intent words from team_b
-        for suffix in ["scores", "score", "result", "what is happening",
-                        "live", "match", "game", "update", "highlights",
-                        "lineup", "lineups", "stats", "xg"]:
+        team_b = team_b_raw
+        for suffix in ["who scored", "who score", "scores", "score", "result",
+                        "what is happening", "live", "match", "game", "update",
+                        "lineup", "lineups", "stats", "xg", "goals", "scored",
+                        "cards", "events", "details", "summary", "preview",
+                        "injuries", "injured", "referee", "weather", "coach",
+                        "head to head", "h2h", "insights", "prediction",
+                        "commentary", "updates", "latest", "what's happening",
+                        "whats happening", "going on"]:
             if team_b.lower().endswith(suffix):
                 team_b = team_b[:-(len(suffix))].strip()
                 break
 
-        # Detect if user wants detailed match info (scorers, events, lineups)
-        detail_words = {"scored", "scorer", "goal", "goals", "who scored",
-                        "lineup", "lineups", "cards", "card", "red card",
-                        "yellow card", "substitution", "subs", "events",
-                        "xg", "stats", "statistics", "details", "summary"}
-        q_lower = query.lower()
-        needs_detail = any(w in q_lower for w in detail_words)
+        # Check if user wants live commentary
+        commentary_words = {"commentary", "updates", "latest", "happening", "going on",
+                            "whats happening", "what's happening", "live updates",
+                            "what is happening", "summarize", "summary of the match"}
+        wants_commentary = any(w in query.lower() for w in commentary_words)
 
-        # Search for team A and get their match data (fresh, no cache)
         tid, tname = _resolve_team(team_a)
         if tid:
-            from ai_answer import generate_answer, summarize_data
-            api._cache = {}  # Force fresh data for live queries
-            raw = api.team(tid)
+            from ai_answer import generate_answer
+            from match_data import extract_full_match_data, summarize_full_match
 
-            # If user wants details (scorers etc.), fetch via browser
-            if needs_detail:
-                # Find the match ID from team fixtures
-                overview = raw.get("overview", {})
-                match_data = None
-                # Check nextMatch (could be ongoing) and lastMatch
+            # Get team data to find match URL
+            api._cache = {}
+            raw = api.team(tid)
+            overview = raw.get("overview", {})
+
+            # If user wants commentary, fetch it directly
+            if wants_commentary:
                 for match_key in ("nextMatch", "lastMatch"):
                     m = overview.get(match_key, {})
-                    if m:
-                        opp = m.get("opponent", {}).get("name", "")
-                        # Check if opponent matches team_b
-                        if team_b.lower() in opp.lower() or opp.lower() in team_b.lower():
-                            match_id = m.get("id")
-                            page_url = m.get("pageUrl")
-                            if match_id and page_url:
-                                console.print(f"[dim]Loading match details (browser)...[/dim]")
-                                from browser import get_match_details
-                                match_data = get_match_details(match_id, match_url=page_url)
-                                break
+                    if m and m.get("status", {}).get("started"):
+                        mid = m.get("id")
+                        purl = m.get("pageUrl")
+                        if mid and purl:
+                            console.print("[dim]Loading live commentary...[/dim]")
+                            from browser import get_match_commentary
+                            entries = get_match_commentary(mid, match_url=purl, limit=15)
+                            if entries:
+                                commentary_text = "\n".join(
+                                    [f"{e['minute']}': {e['text']}" for e in entries]
+                                )
+                                h = m.get("home", {}).get("name", "")
+                                a = m.get("away", {}).get("name", "")
+                                score = m.get("status", {}).get("scoreStr", "")
+                                header = f"LIVE: {h} {score} {a}\n\nCommentary (latest):\n{commentary_text}"
+                                answer = generate_answer(query, header)
+                                if answer:
+                                    console.print(f"\n{answer}\n")
+                                    return
+                                # Fallback: print raw
+                                console.print(f"\n[bold]{h} {score} {a}[/bold] (LIVE)\n")
+                                for e in entries:
+                                    console.print(f"  [dim]{e['minute']}'[/dim] {e['text']}")
+                                console.print()
+                                return
+                            break
+                console.print("[yellow]No live commentary available for this match.[/yellow]")
+                return
 
-                if match_data and "content" in match_data:
-                    # Summarize match events for AI
-                    events = match_data.get("content", {}).get("matchFacts", {}).get("events", {}).get("events", [])
-                    general = match_data.get("general", {})
-                    header = match_data.get("header", {})
-                    teams = header.get("teams", [])
-                    home_name = teams[0].get("name", "") if len(teams) > 0 else ""
-                    away_name = teams[1].get("name", "") if len(teams) > 1 else ""
-                    home_score = teams[0].get("score", "") if len(teams) > 0 else ""
-                    away_score = teams[1].get("score", "") if len(teams) > 1 else ""
+            # Find the match page URL
+            match_loaded = False
+            for match_key in ("nextMatch", "lastMatch"):
+                m = overview.get(match_key, {})
+                if m:
+                    match_id = m.get("id")
+                    page_url = m.get("pageUrl")
+                    if match_id and page_url:
+                        console.print(f"[dim]Loading full match data...[/dim]")
+                        from browser import get_match_details
+                        page_props = get_match_details(match_id, match_url=page_url)
+                        if page_props and "content" in page_props:
+                            full_data = extract_full_match_data(page_props)
+                            summary = summarize_full_match(full_data)
+                            answer = generate_answer(query, summary)
+                            if answer:
+                                console.print(f"\n{answer}\n")
+                                return
+                            console.print(summary)
+                            return
+                        break
 
-                    event_lines = [f"Match: {home_name} {home_score} - {away_score} {away_name}"]
-                    event_lines.append(f"League: {general.get('leagueName', '')}, Round {general.get('matchRound', '')}")
-
-                    for ev in events:
-                        ev_type = ev.get("type", "")
-                        time_str = ev.get("timeStr", "")
-                        player = ev.get("player", {}).get("name", "")
-                        if ev_type == "Goal":
-                            assist = ev.get("assistStr", "")
-                            side = "home" if ev.get("isHome") else "away"
-                            event_lines.append(f"GOAL {time_str}': {player} ({side})" + (f" assist: {assist}" if assist else ""))
-                        elif ev_type == "Card":
-                            card = ev.get("card", "")
-                            event_lines.append(f"CARD {time_str}': {player} ({card})")
-                        elif ev_type == "Substitution":
-                            swap = ev.get("swap", [])
-                            p_on = swap[0].get("name", "") if len(swap) > 0 else ""
-                            p_off = swap[1].get("name", "") if len(swap) > 1 else ""
-                            if p_on or p_off:
-                                event_lines.append(f"SUB {time_str}': {p_on} on, {p_off} off")
-
-                    summary = "\n".join(event_lines)
-                    answer = generate_answer(query, summary)
-                    if answer:
-                        console.print(f"\n{answer}\n")
-                        return
-
-            # Standard: just use team data summary
+            # Fallback: use team API data
+            from ai_answer import summarize_data
             summary = summarize_data("team", {}, raw)
             summary += f"\nUser is asking about a match against: {team_b}"
             answer = generate_answer(query, summary)
@@ -699,26 +711,7 @@ def parse_and_execute(query):
             show_team_overview(raw)
             return
         else:
-            # Can't find team — try search
-            results = api.search(f"{team_a} {team_b}")
-            for group in results:
-                for s in group.get("suggestions", []):
-                    if s.get("type") == "match":
-                        status = s.get("status", {})
-                        home = s.get("homeTeamName", "")
-                        away = s.get("awayTeamName", "")
-                        score = status.get("scoreStr", "vs")
-                        league = s.get("leagueName", "")
-                        from display import format_utc_time
-                        if status.get("finished"):
-                            console.print(f"\n  [bold]{home}[/bold] {score} [bold]{away}[/bold]  [dim]FT - {league}[/dim]\n")
-                        elif status.get("started") and not status.get("finished"):
-                            console.print(f"\n  [green]LIVE[/green] [bold]{home}[/bold] {score} [bold]{away}[/bold]  [dim]{league}[/dim]\n")
-                        else:
-                            date = format_utc_time(status.get("utcTime", ""))
-                            console.print(f"\n  [bold]{home}[/bold] vs [bold]{away}[/bold]  [dim]{date} - {league}[/dim]\n")
-                        return
-            console.print(f"[yellow]Could not find match: {team_a} vs {team_b}[/yellow]")
+            console.print(f"[yellow]Could not find team: {team_a}[/yellow]")
             return
 
     # === AI TWO-PASS: Parse → Fetch → Curate answer ===
@@ -734,6 +727,45 @@ def parse_and_execute(query):
             if action in ACTION_MAP:
                 ACTION_MAP[action](query)
                 return
+
+        # Commentary — fetch live commentary for a team's ongoing match
+        if action == "commentary":
+            team_str = params.get("team", params.get("home", ""))
+            if team_str:
+                tid, tname = _resolve_team(team_str)
+                if tid:
+                    api._cache = {}
+                    raw = api.team(tid)
+                    overview = raw.get("overview", {})
+                    for match_key in ("nextMatch", "lastMatch"):
+                        m = overview.get(match_key, {})
+                        if m and m.get("status", {}).get("started") and not m.get("status", {}).get("finished"):
+                            mid = m.get("id")
+                            purl = m.get("pageUrl")
+                            if mid and purl:
+                                console.print("[dim]Loading live commentary...[/dim]")
+                                from browser import get_match_commentary
+                                entries = get_match_commentary(mid, match_url=purl, limit=15)
+                                if entries:
+                                    commentary_text = "\n".join([f"{e['minute']}': {e['text']}" for e in entries])
+                                    h = m.get("home", {}).get("name", "")
+                                    a = m.get("away", {}).get("name", "")
+                                    score = m.get("status", {}).get("scoreStr", "")
+                                    header = f"LIVE: {h} {score} {a}\n\nCommentary:\n{commentary_text}"
+                                    answer = generate_answer(query, header)
+                                    if answer:
+                                        console.print(f"\n{answer}\n")
+                                    else:
+                                        console.print(f"\n[bold]{h} {score} {a}[/bold]\n")
+                                        for e in entries:
+                                            console.print(f"  [dim]{e['minute']}'[/dim] {e['text']}")
+                                        console.print()
+                                    return
+                            break
+                    console.print(f"[yellow]No live match found for {tname}. Commentary is only available during live matches.[/yellow]")
+                    return
+            console.print("[yellow]Which team? Try: commentary arsenal, or vitoria vs gremio commentary[/yellow]")
+            return
 
         # Live tracking — handle "X vs Y" match format
         if action == "live":

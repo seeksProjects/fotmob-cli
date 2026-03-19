@@ -50,9 +50,22 @@ Fix typos. Understand context:
 - "who is top of la liga" → standings for la liga (wants #1 team)
 - "did chelsea lose" → last_match for Chelsea
 - "give me ars last 5 matches" → team_fixtures for Arsenal, limit 5
+- "bournemouth vs man united injuries" → match_preview with focus on injuries
+- "who is the referee for arsenal vs chelsea" → match_preview (referee info is in match data)
+- "predicted lineup arsenal vs city" → match_preview (lineup info is in match data)
+- "match preview bournemouth vs man united" → match_preview
+- "what is happening in X vs Y" → live for the match
+- "commentary for arsenal vs chelsea" → commentary
+- "what is happening in the match" → commentary (if asking about live action)
+- "latest updates vitoria vs gremio" → commentary
+
+Additional actions:
+- match_preview: {home: "Bournemouth", away: "Man United"} — Full match preview (lineups, injuries, insights, referee, weather, H2H, form). Use this for any "vs" query asking about match details.
+- commentary: {home: "Team A", away: "Team B"} or {team: "Arsenal"} — Live match commentary/updates. Use when user asks "what is happening", "commentary", "latest updates", "match updates", "what's going on".
 
 RESPOND WITH ONLY JSON:
-{"action": "player", "params": {"player": "Haaland"}}"""
+{"action": "player", "params": {"player": "Haaland"}}
+{"action": "match_preview", "params": {"home": "Bournemouth", "away": "Man United"}}"""
 
 
 ANSWER_PROMPT = """You are a football data assistant. The user asked a question and we fetched data from FotMob.
@@ -61,12 +74,21 @@ Your job: Answer the user's SPECIFIC question using ONLY the data provided. Be c
 
 RULES:
 - Answer the EXACT question asked. Don't dump all data.
-- "haaland man city when?" → Find and state the transfer date, not all his stats.
-- "who is top of la liga" → Name the #1 team and their points, not the full table.
-- "2 days ago champions result" → Show only matches from that date, summarize scores.
-- "did PSG lose?" → Say "Yes, PSG lost 0-3 to Chelsea" or "No, PSG won", not show all match data.
-- "last 5 matches arsenal" → List the 5 matches with scores, brief.
-- Keep answers to 1-5 lines. Be conversational but factual.
+- "haaland man city when?" → Find and state the transfer date.
+- "who is top of la liga" → Name the #1 team and their points.
+- "did PSG lose?" → Say "Yes, PSG lost 0-3 to Chelsea" or "No, PSG won".
+- "who is injured" → List injured players with injury type and return date.
+- "who is the referee" → Name the referee and country.
+- "weather" → Give temperature and conditions.
+- "predicted lineup" → List formation and all players with shirt numbers.
+- "who is the coach" → Name the coach.
+- "head to head" → Give H2H record and recent meetings with scores.
+- "match preview" or general "tell me about the match" → Give a comprehensive preview: date, venue, form, key insights, injuries, top scorers, H2H.
+- "match insight" → Share the key match insights.
+- "squad value" → Compare squad market values.
+- Keep answers to 1-10 lines depending on what's asked. Be conversational but factual.
+- For lineups/injuries/form: be more detailed (list everything).
+- For simple questions (score, referee, coach): keep it to 1-2 lines.
 - Use the data provided — don't make up information.
 - If the data doesn't contain the answer, say so.
 - Format: Use plain text. For scores, use "Team 2-1 Team" format."""
