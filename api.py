@@ -2,22 +2,34 @@
 
 import json
 import time
-from curl_cffi import requests as cffi_requests
+
+try:
+    from curl_cffi import requests as cffi_requests
+    _HAS_CURL_CFFI = True
+except ImportError:
+    import requests as _stdlib_requests
+    _HAS_CURL_CFFI = False
 
 BASE_URL = "https://www.fotmob.com/api"
-IMPERSONATE = "chrome"
 TIMEOUT = 15
+
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Referer": "https://www.fotmob.com/",
+}
 
 
 class FotMobAPI:
     """Client for FotMob's internal API."""
 
     def __init__(self):
-        self.session = cffi_requests.Session(impersonate=IMPERSONATE)
-        self.session.headers.update({
-            "Accept": "application/json",
-            "Referer": "https://www.fotmob.com/",
-        })
+        if _HAS_CURL_CFFI:
+            self.session = cffi_requests.Session(impersonate="chrome")
+            self.session.headers.update({"Accept": "application/json", "Referer": "https://www.fotmob.com/"})
+        else:
+            self.session = _stdlib_requests.Session()
+            self.session.headers.update(_HEADERS)
         self._cache = {}
         self._cache_ttl = 60  # seconds
 
