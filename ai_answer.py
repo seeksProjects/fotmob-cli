@@ -30,6 +30,7 @@ PARSE_PROMPT = """You are a football data assistant query parser. Parse the user
 Available actions:
 - standings: {league: "premier league"} — League table
 - fixtures: {league: "ucl", round: 5} — Match schedule (round optional)
+- upcoming: {leagues: ["premier league", "la liga", "ucl"], limit: 5} — Upcoming matches across multiple leagues. Use when user doesn't specify a team or league. Default to top 5 leagues.
 - team: {team: "Arsenal"} — Team info, form, overview
 - team_fixtures: {team: "Arsenal", limit: 5} — Team's recent matches
 - squad: {team: "Barcelona"} — Team roster
@@ -58,6 +59,11 @@ Fix typos. Understand context:
 - "commentary for arsenal vs chelsea" → commentary
 - "what is happening in the match" → commentary (if asking about live action)
 - "latest updates vitoria vs gremio" → commentary
+- "give me 5 scheduled matches" → upcoming with limit 5 (no specific team/league)
+- "any matches today" → upcoming (general)
+- "what's on this weekend" → upcoming
+- "biggest match this week" → upcoming
+- "which teams play tomorrow" → upcoming
 - "where can i watch man united next match" → match_preview for Man United (TV/broadcast info is in match data)
 - "is there odds for man united" → match_preview for Man United (odds/prediction in match data)
 - "who is the referee for man united" → match_preview for Man United

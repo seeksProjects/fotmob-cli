@@ -722,6 +722,41 @@ def parse_and_execute(query):
         action = parsed["action"]
         params = parsed.get("params", {})
 
+        # Upcoming — general upcoming matches across leagues
+        if action == "upcoming":
+            limit = params.get("limit", 5)
+            league_names = params.get("leagues", ["premier league", "la liga", "champions league", "bundesliga", "serie a"])
+            from nlp import extract_league
+            all_upcoming = []
+            for ln in league_names:
+                lid, _, _ = extract_league(ln)
+                if not lid:
+                    lid = fuzzy_match_league(ln)
+                if lid:
+                    try:
+                        data = api.league(lid)
+                        details = data.get("details", {})
+                        league_display = details.get("name", ln)
+                        matches = data.get("fixtures", {}).get("allMatches", [])
+                        upcoming = [m for m in matches if not m.get("status", {}).get("finished") and not m.get("status", {}).get("started")]
+                        for m in upcoming[:3]:
+                            h = m.get("home", {}).get("name", "")
+                            a = m.get("away", {}).get("name", "")
+                            date = m.get("status", {}).get("utcTime", "")
+                            all_upcoming.append(f"{h} vs {a} | {date[:10]} | {league_display}")
+                    except Exception:
+                        continue
+            if all_upcoming:
+                summary = "Upcoming matches:\n" + "\n".join(all_upcoming[:int(limit)])
+                answer = generate_answer(query, summary)
+                if answer:
+                    console.print(f"\n{answer}\n")
+                    return
+                console.print(f"\n{summary}\n")
+                return
+            console.print("[yellow]No upcoming matches found.[/yellow]")
+            return
+
         # Match preview — full data via browser (TV, referee, lineup, injuries, etc.)
         if action == "match_preview":
             team_str = params.get("team", params.get("home", ""))

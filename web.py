@@ -225,6 +225,30 @@ def handle_query(query):
                 "  X vs Y score - Match score"
             )
 
+        # Upcoming — general upcoming matches across leagues
+        if action == "upcoming":
+            limit = params.get("limit", 5)
+            league_ids = [47, 87, 42, 54, 55, 53, 73]
+            all_upcoming = []
+            for lid in league_ids:
+                try:
+                    data = api.league(lid)
+                    league_name = data.get("details", {}).get("name", "")
+                    matches = data.get("fixtures", {}).get("allMatches", [])
+                    upcoming = [m for m in matches if not m.get("status", {}).get("finished") and not m.get("status", {}).get("started")]
+                    for m in upcoming[:2]:
+                        h = m.get("home", {}).get("name", "")
+                        a = m.get("away", {}).get("name", "")
+                        date = m.get("status", {}).get("utcTime", "")
+                        all_upcoming.append(f"{h} vs {a} | {date[:10]} | {league_name}")
+                except Exception:
+                    continue
+            if all_upcoming:
+                summary = "Upcoming matches:\n" + "\n".join(all_upcoming[:int(limit)])
+                answer = generate_answer(query, summary)
+                return answer or summary
+            return "No upcoming matches found."
+
         # Match preview — full match data via browser
         if action == "match_preview":
             team_str = params.get("team", params.get("home", ""))
