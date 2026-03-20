@@ -722,6 +722,42 @@ def parse_and_execute(query):
         action = parsed["action"]
         params = parsed.get("params", {})
 
+        # Match preview — full data via browser (TV, referee, lineup, injuries, etc.)
+        if action == "match_preview":
+            team_str = params.get("team", params.get("home", ""))
+            if team_str:
+                tid, tname = _resolve_team(team_str)
+                if tid:
+                    from match_data import extract_full_match_data, summarize_full_match
+                    api._cache = {}
+                    raw = api.team(tid)
+                    overview = raw.get("overview", {})
+                    for match_key in ("nextMatch", "lastMatch"):
+                        m = overview.get(match_key, {})
+                        if m:
+                            mid = m.get("id")
+                            purl = m.get("pageUrl")
+                            if mid and purl:
+                                console.print("[dim]Loading full match data...[/dim]")
+                                from browser import get_match_details
+                                page_props = get_match_details(mid, match_url=purl)
+                                if page_props and "content" in page_props:
+                                    full_data = extract_full_match_data(page_props)
+                                    summary = summarize_full_match(full_data)
+                                    answer = generate_answer(query, summary)
+                                    if answer:
+                                        console.print(f"\n{answer}\n")
+                                        return
+                            break
+                    # Fallback
+                    summary = summarize_data("team", {}, raw)
+                    answer = generate_answer(query, summary)
+                    if answer:
+                        console.print(f"\n{answer}\n")
+                        return
+            console.print("[yellow]Could not find team for match preview.[/yellow]")
+            return
+
         # Actions that need raw display (help, leagues) — skip AI curation
         if action in ("help", "leagues"):
             if action in ACTION_MAP:

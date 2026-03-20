@@ -225,6 +225,65 @@ def handle_query(query):
                 "  X vs Y score - Match score"
             )
 
+        # Match preview — full match data via browser
+        if action == "match_preview":
+            team_str = params.get("team", params.get("home", ""))
+            if team_str:
+                tid, tname = _resolve_team(team_str)
+                if tid:
+                    api._cache = {}
+                    raw = api.team(tid)
+                    overview = raw.get("overview", {})
+                    for match_key in ("nextMatch", "lastMatch"):
+                        m = overview.get(match_key, {})
+                        if m:
+                            mid = m.get("id")
+                            purl = m.get("pageUrl")
+                            if mid and purl:
+                                from browser import get_match_details
+                                from match_data import extract_full_match_data, summarize_full_match
+                                page_props = get_match_details(mid, match_url=purl)
+                                if page_props and "content" in page_props:
+                                    full_data = extract_full_match_data(page_props)
+                                    summary = summarize_full_match(full_data)
+                                    answer = generate_answer(query, summary)
+                                    return answer or summary
+                            break
+                    # Fallback to team data
+                    summary = summarize_data("team", {}, raw)
+                    answer = generate_answer(query, summary)
+                    return answer or summary
+            return "Could not find team for match preview."
+
+        # Commentary — live match commentary
+        if action == "commentary":
+            team_str = params.get("team", params.get("home", ""))
+            if team_str:
+                tid, tname = _resolve_team(team_str)
+                if tid:
+                    api._cache = {}
+                    raw = api.team(tid)
+                    overview = raw.get("overview", {})
+                    for match_key in ("nextMatch", "lastMatch"):
+                        m = overview.get(match_key, {})
+                        if m and m.get("status", {}).get("started") and not m.get("status", {}).get("finished"):
+                            mid = m.get("id")
+                            purl = m.get("pageUrl")
+                            if mid and purl:
+                                from browser import get_match_commentary
+                                entries = get_match_commentary(mid, match_url=purl, limit=15)
+                                if entries:
+                                    h = m.get("home", {}).get("name", "")
+                                    a = m.get("away", {}).get("name", "")
+                                    score = m.get("status", {}).get("scoreStr", "")
+                                    commentary_text = "\n".join([f"{e['minute']}': {e['text']}" for e in entries])
+                                    header = f"LIVE: {h} {score} {a}\n\nCommentary:\n{commentary_text}"
+                                    answer = generate_answer(query, header)
+                                    return answer or header
+                            break
+                    return f"No live match found for {tname}. Commentary is only available during live matches."
+            return "Which team? Try: commentary arsenal"
+
         # Standings — show full table if user wants it
         if action == "standings":
             q_lower = query.lower()

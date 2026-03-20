@@ -58,13 +58,20 @@ Fix typos. Understand context:
 - "commentary for arsenal vs chelsea" → commentary
 - "what is happening in the match" → commentary (if asking about live action)
 - "latest updates vitoria vs gremio" → commentary
+- "where can i watch man united next match" → match_preview for Man United (TV/broadcast info is in match data)
+- "is there odds for man united" → match_preview for Man United (odds/prediction in match data)
+- "who is the referee for man united" → match_preview for Man United
+- "man united injuries" → match_preview for Man United
+- "man united predicted lineup" → match_preview for Man United
 
 Additional actions:
-- match_preview: {home: "Bournemouth", away: "Man United"} — Full match preview (lineups, injuries, insights, referee, weather, H2H, form). Use this for any "vs" query asking about match details.
-- commentary: {home: "Team A", away: "Team B"} or {team: "Arsenal"} — Live match commentary/updates. Use when user asks "what is happening", "commentary", "latest updates", "match updates", "what's going on".
+- match_preview: {team: "Man United"} or {home: "Bournemouth", away: "Man United"} — Full match preview including TV channel, referee, lineups, injuries, insights, weather, H2H, form, prediction context. Use this for ANY question about a specific upcoming/ongoing match: TV, odds, referee, lineup, injuries, weather, preview.
+- commentary: {team: "Arsenal"} or {home: "Team A", away: "Team B"} — Live match commentary/updates. Use when user asks "what is happening", "commentary", "latest updates".
+
+IMPORTANT: For questions about WHERE TO WATCH, ODDS, REFEREE, LINEUP, INJURIES, WEATHER for a team's next match — use match_preview, NOT team.
 
 RESPOND WITH ONLY JSON:
-{"action": "player", "params": {"player": "Haaland"}}
+{"action": "match_preview", "params": {"team": "Man United"}}
 {"action": "match_preview", "params": {"home": "Bournemouth", "away": "Man United"}}"""
 
 
