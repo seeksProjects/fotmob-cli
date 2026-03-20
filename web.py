@@ -118,19 +118,19 @@ def handle_query(query):
 
         # Strip trailing intent words from team_b
         team_b = team_b_raw
-        for suffix in ["who scored", "who score", "scores", "score", "result",
-                        "what is happening", "live", "match", "game", "update",
-                        "lineup", "lineups", "stats", "xg", "goals", "scored",
-                        "cards", "events", "details", "summary"]:
+        for suffix in ["who scored", "who score", "where to watch", "scores", "score",
+                        "result", "what is happening", "live", "match", "game",
+                        "update", "lineup", "lineups", "stats", "xg", "goals",
+                        "scored", "cards", "events", "details", "summary",
+                        "watch", "tv", "channel", "odds", "prediction",
+                        "injuries", "injured", "referee", "preview",
+                        "commentary", "updates"]:
             if team_b.lower().endswith(suffix):
                 team_b = team_b[:-(len(suffix))].strip()
                 break
 
-        # Check if user wants detailed events
-        detail_words = {"scored", "scorer", "score", "goal", "goals", "who scored",
-                        "who score", "lineup", "lineups", "cards", "events", "xg",
-                        "stats", "details"}
-        wants_detail = any(w in query.lower() for w in detail_words)
+        # Any "vs" query should use full match data (browser) for accurate answers
+        wants_detail = True
 
         print(f"[WEB] VS query: team_a={team_a}, team_b={team_b}, wants_detail={wants_detail}", flush=True)
         tid, tname = _resolve_team(team_a)
@@ -140,7 +140,7 @@ def handle_query(query):
             raw = api.team(tid)
 
             if wants_detail:
-                # Try to find the match and fetch details via browser
+                # Use comprehensive match data extractor
                 overview = raw.get("overview", {})
                 for mk in ("nextMatch", "lastMatch"):
                     m = overview.get(mk, {})
@@ -148,52 +148,19 @@ def handle_query(query):
                         continue
                     mid = m.get("id")
                     purl = m.get("pageUrl")
-                    print(f"[WEB] Detail fetch: mk={mk}, mid={mid}, purl={purl}", flush=True)
                     if mid and purl:
                         try:
                             from browser import get_match_details
+                            from match_data import extract_full_match_data, summarize_full_match
                             md = get_match_details(mid, match_url=purl)
-                            print(f"[WEB] Browser returned: {type(md)}, has content: {'content' in md if md else False}", flush=True)
+                            if md and "content" in md:
+                                full_data = extract_full_match_data(md)
+                                summary = summarize_full_match(full_data)
+                                answer = generate_answer(query, summary)
+                                return answer or summary
                         except Exception as e:
                             print(f"[WEB] Browser FAILED: {e}", flush=True)
-                            md = None
-                        if md and "content" in md:
-                            events = md.get("content", {}).get("matchFacts", {}).get("events", {}).get("events", [])
-                            header = md.get("header", {})
-                            teams_h = header.get("teams", [])
-                            hn = teams_h[0].get("name", "") if teams_h else ""
-                            an = teams_h[1].get("name", "") if len(teams_h) > 1 else ""
-                            hs = teams_h[0].get("score", "") if teams_h else ""
-                            as_ = teams_h[1].get("score", "") if len(teams_h) > 1 else ""
-                            status = header.get("status", {})
-                            is_live = status.get("started") and not status.get("finished")
-
-                            ev_lines = [f"Match: {hn} {hs} - {as_} {an}"]
-                            if is_live:
-                                ev_lines.append("Status: LIVE (match is currently being played)")
-                            for ev in events:
-                                if ev.get("type") == "Goal":
-                                    pname = ev.get("player", {}).get("name", "Unknown")
-                                    assist = ev.get("assistStr", "")
-                                    side = hn if ev.get("isHome") else an
-                                    ev_lines.append(f"GOAL {ev.get('timeStr')}': {pname} ({side})" +
-                                                    (f" - {assist}" if assist else ""))
-                                elif ev.get("type") == "Card":
-                                    ev_lines.append(f"CARD {ev.get('timeStr')}': {ev.get('player', {}).get('name', '')} ({ev.get('card', '')})")
-                                elif ev.get("type") == "Substitution":
-                                    swap = ev.get("swap", [])
-                                    p_on = swap[0].get("name", "") if len(swap) > 0 else ""
-                                    p_off = swap[1].get("name", "") if len(swap) > 1 else ""
-                                    if p_on or p_off:
-                                        ev_lines.append(f"SUB {ev.get('timeStr')}': {p_on} on, {p_off} off")
-
-                            if not any("GOAL" in l for l in ev_lines):
-                                ev_lines.append("No goals scored yet.")
-
-                            summary = "\n".join(ev_lines)
-                            answer = generate_answer(query, summary)
-                            return answer or summary
-                        break  # Only try one match
+                        break
 
             # Standard: just use team data summary
             summary = summarize_data("team", {}, raw)
@@ -499,22 +466,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         /* ========== TERMINAL MODE ========== */
         body.terminal {
             background: #0d1117; color: #c9d1d9;
-            font-family: 'Courier New', Consolas, monospace;
+            font-family: 'Courier New', 'Consolas', monospace;
         }
         .terminal #header { background: #0d1117; border-bottom: 1px solid #30363d; }
         .terminal #header h1 { color: #58a6ff; }
         .terminal #mode-toggle { color: #8b949e; border-color: #30363d; }
         .terminal #mode-toggle:hover { color: #c9d1d9; border-color: #58a6ff; }
-        .terminal #output { white-space: pre-wrap; line-height: 1.5; }
+        .terminal #output { white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; padding: 12px 16px; }
         .terminal #input-bar { background: #161b22; border-top: 1px solid #30363d; }
-        .terminal #query-input { background: #0d1117; color: #c9d1d9; border-radius: 6px; font-family: inherit; }
+        .terminal #query-input {
+            background: transparent; color: #c9d1d9; border-radius: 0;
+            font-family: 'Courier New', 'Consolas', monospace; padding: 8px 0;
+        }
         .terminal #query-input::placeholder { color: #484f58; }
-        .terminal #send-btn { background: #238636; color: white; border-radius: 6px; width: auto; padding: 8px 16px; }
+        .terminal #send-btn {
+            background: #238636; color: white; border-radius: 6px;
+            width: auto; height: auto; padding: 8px 16px; font-size: 14px;
+            font-family: 'Courier New', 'Consolas', monospace;
+        }
+        .terminal .msg-row { display: block !important; }
+        .terminal .msg-row .msg-bubble { all: unset; }
+        .terminal .msg-row .msg-time { display: none; }
+        .terminal .msg-row .bot-avatar { display: none; }
+        .terminal .msg-row.user .msg-bubble { color: #3fb950; }
+        .terminal .msg-row.user .msg-bubble::before { content: "> "; }
+        .terminal .msg-row.bot .msg-bubble {
+            color: #c9d1d9; display: block; white-space: pre-wrap;
+            margin-bottom: 6px; max-width: 100%; background: none;
+            box-shadow: none; padding: 0; border-radius: 0;
+        }
+        .terminal .msg-row.bot.msg-loading .msg-bubble { color: #8b949e; font-style: italic; background: none; }
+        .terminal .msg-row.bot.msg-error .msg-bubble { color: #f85149; background: none; }
         .terminal .msg-user { color: #3fb950; margin-top: 10px; }
-        .terminal .msg-bot { color: #c9d1d9; margin-bottom: 6px; }
+        .terminal .msg-user::before { content: "> "; }
+        .terminal .msg-bot { color: #c9d1d9; margin-bottom: 6px; white-space: pre-wrap; }
         .terminal .msg-loading { color: #8b949e; font-style: italic; }
         .terminal .msg-error { color: #f85149; }
-        .terminal .msg-user::before { content: "> "; }
 
         /* ========== CHAT MODE ========== */
         body.chat {
