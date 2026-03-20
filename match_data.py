@@ -22,8 +22,8 @@ def extract_tv_and_odds_from_browser(sb):
             if (t.includes("Sport") || t.includes("DStv") || t.includes("ESPN") ||
                 t.includes("Sky") || t.includes("NBC") || t.includes("BT Sport") ||
                 t.includes("beIN") || t.includes("DAZN") || t.includes("Canal") ||
-                t.includes("StarTimes") || t.includes("TV")) {
-                if (!t.includes("Stadium") && !t.includes("Round") && !t.includes("Referee") && t.length < 100) {
+                t.includes("StarTimes") || t.includes("TV") || t.includes("streaming")) {
+                if (!t.includes("Stadium") && !t.includes("Round") && !t.includes("Referee") && t.length < 150 && !t.includes("TV schedules")) {
                     results.tv = t;
                     break;
                 }
@@ -438,9 +438,12 @@ def summarize_full_match(data):
     if data.get("referee"):
         lines.append(f"Referee: {data['referee']} ({data['referee_country']})")
 
-    # TV Channel
-    if data.get("tv_channel"):
-        lines.append(f"TV/Broadcast: {data['tv_channel']}")
+    # TV Channel (filter out generic placeholders)
+    tv = data.get("tv_channel", "")
+    if tv and "find out where" not in tv.lower() and "streaming info" not in tv.lower() and len(tv) > 5:
+        lines.append(f"TV/Broadcast: {tv}")
+    else:
+        lines.append("TV/Broadcast: Check your local TV listings or FotMob app for broadcast info in your region.")
 
     # Betting odds
     odds = data.get("odds")
