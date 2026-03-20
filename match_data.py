@@ -155,12 +155,23 @@ def extract_full_match_data(page_props):
         "home_squad_value": lineup_data.get("homeTeam", {}).get("totalStarterMarketValue"),
         "away_squad_value": lineup_data.get("awayTeam", {}).get("totalStarterMarketValue"),
 
-        # --- TV & ODDS (extracted from rendered browser DOM) ---
+        # --- TV (extracted from rendered browser DOM) ---
         "tv_channel": page_props.get("_browser_tv_channel", ""),
-        "odds_provider": page_props.get("_browser_odds_provider", ""),
+
+        # --- BETTING ODDS (from The Odds API) ---
+        "odds": _fetch_odds(home_team.get("name", ""), away_team.get("name", ""), general.get("leagueName", "")),
     }
 
     return result
+
+
+def _fetch_odds(home_team, away_team, league_name):
+    """Fetch betting odds from The Odds API."""
+    try:
+        from odds import get_match_odds
+        return get_match_odds(home_team, away_team, league_name)
+    except Exception:
+        return None
 
 
 def _extract_weather(weather):
@@ -430,6 +441,12 @@ def summarize_full_match(data):
     # TV Channel
     if data.get("tv_channel"):
         lines.append(f"TV/Broadcast: {data['tv_channel']}")
+
+    # Betting odds
+    odds = data.get("odds")
+    if odds:
+        from odds import format_odds_text
+        lines.append(format_odds_text(odds))
 
     # Poll / Prediction context
     poll = data.get("poll")
