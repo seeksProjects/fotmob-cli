@@ -1,195 +1,180 @@
-"""TV channel lookup via LiveSoccerTV.
+"""TV channel lookup via LiveSoccerTV — HTTP scraping (no browser needed).
 
-Scrapes LiveSoccerTV for match broadcast information.
-Prioritizes: UK, US, Europe, then Americas.
+Scrapes LiveSoccerTV team pages for match broadcast information.
+Uses plain HTTP requests with BeautifulSoup — works on cloud without Chrome.
 """
 
-import json
 import logging
-import re
+
+try:
+    from curl_cffi import requests as _http
+    _HAS_CURL = True
+except ImportError:
+    import requests as _http
+    _HAS_CURL = False
+
+try:
+    from bs4 import BeautifulSoup
+    _HAS_BS4 = True
+except ImportError:
+    _HAS_BS4 = False
 
 logger = logging.getLogger(__name__)
 
-# Team name → LiveSoccerTV URL slug mapping
 TEAM_SLUGS = {
     # Premier League
-    "arsenal": "england/arsenal",
-    "aston villa": "england/aston-villa",
-    "bournemouth": "england/afc-bournemouth",
-    "afc bournemouth": "england/afc-bournemouth",
-    "brentford": "england/brentford",
-    "brighton": "england/brighton-hove-albion",
+    "arsenal": "england/arsenal", "aston villa": "england/aston-villa",
+    "bournemouth": "england/afc-bournemouth", "afc bournemouth": "england/afc-bournemouth",
+    "brentford": "england/brentford", "brighton": "england/brighton-hove-albion",
     "brighton and hove albion": "england/brighton-hove-albion",
-    "burnley": "england/burnley",
-    "chelsea": "england/chelsea",
-    "crystal palace": "england/crystal-palace",
-    "everton": "england/everton",
-    "fulham": "england/fulham",
-    "leeds": "england/leeds-united",
-    "leeds united": "england/leeds-united",
-    "liverpool": "england/liverpool",
-    "man city": "england/manchester-city",
-    "manchester city": "england/manchester-city",
-    "man united": "england/manchester-united",
-    "manchester united": "england/manchester-united",
-    "newcastle": "england/newcastle-united",
-    "newcastle united": "england/newcastle-united",
-    "nottm forest": "england/nottingham-forest",
-    "nottingham forest": "england/nottingham-forest",
-    "sunderland": "england/sunderland",
-    "tottenham": "england/tottenham-hotspur",
+    "burnley": "england/burnley", "chelsea": "england/chelsea",
+    "crystal palace": "england/crystal-palace", "everton": "england/everton",
+    "fulham": "england/fulham", "leeds": "england/leeds-united",
+    "leeds united": "england/leeds-united", "liverpool": "england/liverpool",
+    "man city": "england/manchester-city", "manchester city": "england/manchester-city",
+    "man united": "england/manchester-united", "manchester united": "england/manchester-united",
+    "newcastle": "england/newcastle-united", "newcastle united": "england/newcastle-united",
+    "nottm forest": "england/nottingham-forest", "nottingham forest": "england/nottingham-forest",
+    "sunderland": "england/sunderland", "tottenham": "england/tottenham-hotspur",
     "tottenham hotspur": "england/tottenham-hotspur",
-    "west ham": "england/west-ham-united",
-    "west ham united": "england/west-ham-united",
+    "west ham": "england/west-ham-united", "west ham united": "england/west-ham-united",
     "wolves": "england/wolverhampton-wanderers",
-    "wolverhampton wanderers": "england/wolverhampton-wanderers",
     # La Liga
-    "barcelona": "spain/barcelona",
-    "real madrid": "spain/real-madrid",
-    "atletico madrid": "spain/atletico-madrid",
-    "sevilla": "spain/sevilla",
-    "villarreal": "spain/villarreal",
-    "real betis": "spain/real-betis",
-    "real sociedad": "spain/real-sociedad",
-    "athletic club": "spain/athletic-club",
+    "barcelona": "spain/barcelona", "real madrid": "spain/real-madrid",
+    "atletico madrid": "spain/atletico-madrid", "sevilla": "spain/sevilla",
+    "villarreal": "spain/villarreal", "real betis": "spain/real-betis",
+    "real sociedad": "spain/real-sociedad", "athletic club": "spain/athletic-club",
+    "valencia": "spain/valencia", "celta vigo": "spain/celta-vigo",
+    "getafe": "spain/getafe", "osasuna": "spain/osasuna",
+    "mallorca": "spain/mallorca", "espanyol": "spain/espanyol",
     # Bundesliga
-    "bayern munich": "germany/bayern-munich",
-    "bayern munchen": "germany/bayern-munich",
-    "borussia dortmund": "germany/borussia-dortmund",
-    "rb leipzig": "germany/rb-leipzig",
+    "bayern munich": "germany/bayern-munich", "bayern munchen": "germany/bayern-munich",
+    "borussia dortmund": "germany/borussia-dortmund", "rb leipzig": "germany/rb-leipzig",
     "bayer leverkusen": "germany/bayer-leverkusen",
     # Serie A
-    "ac milan": "italy/ac-milan",
-    "milan": "italy/ac-milan",
-    "inter": "italy/internazionale",
-    "internazionale": "italy/internazionale",
-    "juventus": "italy/juventus",
-    "napoli": "italy/napoli",
-    "roma": "italy/roma",
+    "ac milan": "italy/ac-milan", "milan": "italy/ac-milan",
+    "inter": "italy/internazionale", "internazionale": "italy/internazionale",
+    "juventus": "italy/juventus", "napoli": "italy/napoli", "roma": "italy/roma",
     # Ligue 1
-    "psg": "france/paris-saint-germain",
-    "paris saint-germain": "france/paris-saint-germain",
-    "marseille": "france/marseille",
-    "lyon": "france/lyon",
+    "psg": "france/paris-saint-germain", "paris saint-germain": "france/paris-saint-germain",
+    "marseille": "france/marseille", "lyon": "france/lyon",
+    # Eredivisie
+    "ajax": "netherlands/ajax", "psv": "netherlands/psv-eindhoven",
+    "feyenoord": "netherlands/feyenoord", "az alkmaar": "netherlands/az-alkmaar",
+    "heracles": "netherlands/heracles-almelo", "excelsior": "netherlands/excelsior",
+    "nec": "netherlands/nec-nijmegen", "twente": "netherlands/fc-twente",
+    # Other
+    "benfica": "portugal/benfica", "porto": "portugal/fc-porto",
+    "sporting": "portugal/sporting-cp", "galatasaray": "turkey/galatasaray",
+    "fenerbahce": "turkey/fenerbahce", "besiktas": "turkey/besiktas",
+    "celtic": "scotland/celtic", "rangers": "scotland/rangers",
 }
 
-# Priority countries for TV channels (UK, US, Europe, Americas)
-PRIORITY_COUNTRIES = [
-    {"code": "US", "name": "United States", "timezone": "America/New_York", "continent": "Americas"},
-    {"code": "GB", "name": "United Kingdom", "timezone": "Europe/London", "continent": "Europe"},
-    {"code": "ES", "name": "Spain", "timezone": "Europe/Madrid", "continent": "Europe"},
-    {"code": "DE", "name": "Germany", "timezone": "Europe/Berlin", "continent": "Europe"},
-    {"code": "BR", "name": "Brazil", "timezone": "America/Sao_Paulo", "continent": "Americas"},
-    {"code": "MX", "name": "Mexico", "timezone": "America/Mexico_City", "continent": "Americas"},
-]
+_COOKIES = {
+    "u_country": "United States",
+    "u_country_code": "US",
+    "u_timezone": "America/New_York",
+    "u_continent": "Americas",
+}
 
 
-def _get_team_slug(team_name):
-    """Find the LiveSoccerTV URL slug for a team."""
-    key = team_name.lower().strip()
+def _get_team_slug(name):
+    """Find LiveSoccerTV slug for a team name."""
+    key = name.lower().strip()
     if key in TEAM_SLUGS:
         return TEAM_SLUGS[key]
-    # Fuzzy match
-    for name, slug in TEAM_SLUGS.items():
-        if key in name or name in key:
-            return slug
+    for k, v in TEAM_SLUGS.items():
+        if key in k or k in key:
+            return v
     return None
 
 
-def get_tv_channels(team_name, opponent_name=None):
-    """Get TV channels for a team's upcoming match.
+def get_tv_channels(home_team, away_team=None):
+    """Get TV channels for a team's upcoming match via HTTP scraping.
 
-    Uses LiveSoccerTV via browser (seleniumbase).
+    No browser needed — uses plain HTTP + BeautifulSoup.
     Returns dict with match info and channels, or None.
     """
-    slug = _get_team_slug(team_name)
+    if not _HAS_BS4:
+        logger.warning("BeautifulSoup not installed, TV lookup unavailable")
+        return None
+
+    slug = _get_team_slug(home_team)
+    if not slug and away_team:
+        slug = _get_team_slug(away_team)
     if not slug:
-        # Try opponent
-        if opponent_name:
-            slug = _get_team_slug(opponent_name)
-        if not slug:
-            return None
+        return None
+
+    url = f"https://www.livesoccertv.com/teams/{slug}/"
 
     try:
-        from seleniumbase import SB
-        from browser import _get_browser
-
-        sb = _get_browser()
-
-        # Set US cookies for priority channels
-        url = f'https://www.livesoccertv.com/teams/{slug}/'
-        sb.open(url)
-        sb.sleep(3)
-
-        # Set country cookie to US and reload
-        sb.execute_script("""
-            document.cookie = "u_country=United States; path=/; domain=.livesoccertv.com";
-            document.cookie = "u_country_code=US; path=/; domain=.livesoccertv.com";
-            document.cookie = "u_timezone=America%2FNew_York; path=/; domain=.livesoccertv.com";
-            document.cookie = "u_continent=Americas; path=/; domain=.livesoccertv.com";
-        """)
-        sb.open(url)
-        sb.sleep(4)
-
-        # Extract upcoming matches with channels
-        js = """
-        var results = [];
-        var rows = document.querySelectorAll('tr.matchrow');
-        for (var row of rows) {
-            var gameEl = row.querySelector('a');
-            var game = gameEl ? gameEl.textContent.trim() : '';
-
-            var channels = [];
-            var chEls = row.querySelectorAll('td:last-child a, .channelstd a');
-            for (var ch of chEls) {
-                var t = ch.textContent.trim();
-                if (t && t.length > 1 && !t.includes('vs') && !t.includes('FC'))
-                    channels.push(t);
+        if _HAS_CURL:
+            resp = _http.get(url, cookies=_COOKIES, impersonate="chrome", timeout=15)
+        else:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html",
             }
+            resp = _http.get(url, headers=headers, cookies=_COOKIES, timeout=15)
 
-            var time = '';
-            var timeEl = row.querySelector('.timecell span');
-            if (timeEl) time = timeEl.textContent.trim();
+        if resp.status_code != 200:
+            return None
 
-            // Check if it's a played match (has .ft class)
-            var ftEl = row.querySelector('.livecell.ft');
-            var isPlayed = ftEl ? true : false;
+        soup = BeautifulSoup(resp.text, "html.parser")
+        rows = soup.select("tr.matchrow")
 
-            if (game && !isPlayed) {
-                results.push({game: game, time: time, channels: channels});
-            }
-        }
-        return JSON.stringify(results);
-        """
-        result = json.loads(sb.execute_script(js))
+        for row in rows:
+            game_el = row.select_one("a")
+            game = game_el.text.strip() if game_el else ""
 
-        # Find the match that includes the opponent
-        if opponent_name:
-            opp_lower = opponent_name.lower()
-            for m in result:
-                if opp_lower in m["game"].lower():
-                    return {
-                        "match": m["game"],
-                        "time": m["time"],
-                        "channels": m["channels"],
-                        "source": "LiveSoccerTV",
-                        "region": "US",
-                    }
+            # Check if this is played (finished) — skip finished matches
+            ft_el = row.select_one(".livecell.ft")
+            if ft_el:
+                continue
 
-        # Return first upcoming match
-        if result:
+            # Get channels from last td
+            channels = []
+            for a in row.select("td:last-child a"):
+                ch = a.text.strip()
+                if ch and len(ch) > 1:
+                    channels.append(ch)
+
+            if not channels:
+                continue
+
+            # Check if opponent matches
+            if away_team:
+                opp_lower = away_team.lower()
+                if opp_lower not in game.lower() and game.lower() not in opp_lower:
+                    # Try matching partial name
+                    opp_words = set(opp_lower.split())
+                    game_words = set(game.lower().split())
+                    if not opp_words & game_words:
+                        continue
+
             return {
-                "match": result[0]["game"],
-                "time": result[0]["time"],
-                "channels": result[0]["channels"],
+                "match": game,
+                "channels": channels[:6],
                 "source": "LiveSoccerTV",
                 "region": "US",
             }
 
+        # No upcoming match with channels found — return first with channels
+        for row in rows:
+            channels = [a.text.strip() for a in row.select("td:last-child a") if a.text.strip()]
+            if channels:
+                game = row.select_one("a")
+                return {
+                    "match": game.text.strip() if game else "",
+                    "channels": channels[:6],
+                    "source": "LiveSoccerTV",
+                    "region": "US",
+                }
+
         return None
 
     except Exception as e:
-        logger.debug("TV channel lookup failed: %s", e)
+        logger.warning("TV channel lookup failed: %s", e)
         return None
 
 
@@ -198,6 +183,5 @@ def format_tv_text(tv_data):
     if not tv_data or not tv_data.get("channels"):
         return "TV broadcast information not available for this match."
 
-    channels = ", ".join(tv_data["channels"][:5])
-    region = tv_data.get("region", "US")
-    return f"TV/Broadcast ({region}): {channels}"
+    channels = ", ".join(tv_data["channels"])
+    return f"TV/Broadcast (US): {channels}"

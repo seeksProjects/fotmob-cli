@@ -6,3 +6,4 @@ thefuzz>=0.22
 seleniumbase>=4.0
 google-genai>=1.0
 groq>=0.9
+beautifulsoup4>=4.12
