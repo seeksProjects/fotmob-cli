@@ -1055,7 +1055,10 @@ def run_interactive():
             continue
 
         try:
-            parse_and_execute(query)
+            from query_handler import handle_query
+            result = handle_query(query)
+            if result:
+                console.print(f"\n{result}\n")
         except KeyboardInterrupt:
             console.print("\n[dim]Cancelled.[/dim]")
         except Exception as e:
