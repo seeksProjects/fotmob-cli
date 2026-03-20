@@ -155,14 +155,26 @@ def extract_full_match_data(page_props):
         "home_squad_value": lineup_data.get("homeTeam", {}).get("totalStarterMarketValue"),
         "away_squad_value": lineup_data.get("awayTeam", {}).get("totalStarterMarketValue"),
 
-        # --- TV (extracted from rendered browser DOM) ---
-        "tv_channel": page_props.get("_browser_tv_channel", ""),
+        # --- TV (from LiveSoccerTV or FotMob browser DOM) ---
+        "tv_channel": _fetch_tv(home_team.get("name", ""), away_team.get("name", "")) or page_props.get("_browser_tv_channel", ""),
 
         # --- BETTING ODDS (from The Odds API) ---
         "odds": _fetch_odds(home_team.get("name", ""), away_team.get("name", ""), general.get("leagueName", "")),
     }
 
     return result
+
+
+def _fetch_tv(home_team, away_team):
+    """Fetch TV channels from LiveSoccerTV."""
+    try:
+        from tv_channels import get_tv_channels, format_tv_text
+        data = get_tv_channels(home_team, away_team)
+        if data and data.get("channels"):
+            return format_tv_text(data)
+        return None
+    except Exception:
+        return None
 
 
 def _fetch_odds(home_team, away_team, league_name):
@@ -438,12 +450,12 @@ def summarize_full_match(data):
     if data.get("referee"):
         lines.append(f"Referee: {data['referee']} ({data['referee_country']})")
 
-    # TV Channel (filter out generic placeholders)
+    # TV Channel
     tv = data.get("tv_channel", "")
-    if tv and "find out where" not in tv.lower() and "streaming info" not in tv.lower() and len(tv) > 5:
-        lines.append(f"TV/Broadcast: {tv}")
+    if tv and "find out where" not in tv.lower() and "streaming info" not in tv.lower() and "check your" not in tv.lower() and len(tv) > 5:
+        lines.append(tv if tv.startswith("TV/Broadcast") else f"TV/Broadcast: {tv}")
     else:
-        lines.append("TV/Broadcast: Check your local TV listings or FotMob app for broadcast info in your region.")
+        lines.append("TV/Broadcast: Check your local TV listings for this match.")
 
     # Betting odds
     odds = data.get("odds")
