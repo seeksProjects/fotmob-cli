@@ -108,17 +108,33 @@ def handle_query(query):
     """Process any query and return a plain text response.
 
     This is the SINGLE function both web.py and interactive.py should call.
+
+    Strategy:
+    1. AI Agent (Groq function calling) — handles everything intelligently
+    2. Old pipeline fallback — if agent fails or Groq is down
     """
     query = query.strip()
     if not query:
         return "Type a query. Example: arsenal, standings pl, haaland stats"
 
-    # === "X vs Y" queries — top priority ===
+    # === PRIMARY: AI Agent with function calling ===
+    try:
+        from agent import run_agent
+        result = run_agent(query)
+        if result:
+            return result
+    except Exception as e:
+        logger.warning("Agent failed: %s", e)
+
+    # === FALLBACK: Old pipeline ===
+    logger.info("Falling back to old pipeline for: %s", query)
+
+    # "X vs Y" queries
     vs_match = re.search(r'(.+?)\s+vs\.?\s+(.+)', query, re.IGNORECASE)
     if vs_match:
         return _handle_vs_query(query, vs_match)
 
-    # === AI parse ===
+    # AI parse
     parsed = parse_query(query)
     if parsed and isinstance(parsed, dict) and "action" in parsed:
         result = _handle_action(query, parsed)

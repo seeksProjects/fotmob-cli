@@ -79,13 +79,33 @@ _COOKIES = {
 
 
 def _get_team_slug(name):
-    """Find LiveSoccerTV slug for a team name."""
+    """Find LiveSoccerTV slug for a team name. Uses local dict first, then dynamic search."""
     key = name.lower().strip()
     if key in TEAM_SLUGS:
         return TEAM_SLUGS[key]
     for k, v in TEAM_SLUGS.items():
         if key in k or k in key:
             return v
+
+    # Dynamic search via LiveSoccerTV autocomplete
+    try:
+        import re
+        url = f"https://www.livesoccertv.com/es/include/autocomplete.php?search={name}&lang=en&s_type=instant"
+        if _HAS_CURL:
+            resp = _http.get(url, impersonate="chrome", timeout=10)
+        else:
+            resp = _http.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        if resp.status_code == 200:
+            # Extract team URL from HTML: href="/slog.php?q=...&url=%2Fteams%2Fitaly%2Fgenoa%2F"
+            match = re.search(r'url=%2Fteams%2F([^"&]+)%2F', resp.text)
+            if match:
+                slug = match.group(1).replace("%2F", "/")
+                logger.info("Dynamic slug for %s: %s", name, slug)
+                TEAM_SLUGS[key] = slug  # Cache for future lookups
+                return slug
+    except Exception as e:
+        logger.debug("Dynamic slug search failed for %s: %s", name, e)
+
     return None
 
 
